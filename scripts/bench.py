@@ -22,17 +22,18 @@ the kernel is still healthy.
 """
 
 import json
+import logging
 import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 GROKLET = Path(__file__).resolve().parents[1] / "groklet.py"
 
 
-def run_one_verify(language: str, files: Dict[str, str]) -> Dict[str, Any]:
+def run_one_verify(language: str, files: dict[str, str]) -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as td:
         td_path = Path(td)
         for p, c in files.items():
@@ -42,27 +43,43 @@ def run_one_verify(language: str, files: Dict[str, str]) -> Dict[str, Any]:
 
         manifest = td_path / "manifest.json"
         # Always include the self-hash so the kernel's anti-truncation gate is exercised.
-        man_obj = {"files": files}
+        # Use a permissive manifest type here since it contains both a file map and a hash string.
+        man_obj: dict[str, Any] = {"files": files}
         # Replicate the exact hash the verifier + make_edit_manifest expect
         combined = "\n".join(f"{p}\n{c}" for p, c in sorted(files.items()))
         import hashlib
-        man_obj["self_hash"] = "sha256:" + hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+        man_obj["self_hash"] = (
+            "sha256:" + hashlib.sha256(combined.encode("utf-8")).hexdigest()
+        )
         manifest.write_text(json.dumps(man_obj), encoding="utf-8")
 
         cmd = [
             sys.executable,
             str(GROKLET),
             "verify",
-            "--language", language,
-            "--worktree", str(td_path),
-            "--manifest", str(manifest),
-            "--hash", man_obj["self_hash"],
+            "--language",
+            language,
+            "--worktree",
+            str(td_path),
+            "--manifest",
+            str(manifest),
+            "--hash",
+            man_obj["self_hash"],
         ]
         t0 = time.time()
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=90, encoding="utf-8", errors="replace")
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
         dt = (time.time() - t0) * 1000.0
 
-        proof: Dict[str, Any] = {}
+        proof: dict[str, Any] = {}
         for line in reversed((res.stdout or "").splitlines()):
             s = line.strip()
             if s.startswith("{") and s.endswith("}"):
@@ -70,9 +87,11 @@ def run_one_verify(language: str, files: Dict[str, str]) -> Dict[str, Any]:
                     proof = json.loads(s)
                     break
                 except Exception:
-                    pass
+                    logging.getLogger(__name__).debug(
+                        "Suppressed exception", exc_info=True
+                    )
 
-        vres: List[Dict[str, Any]] = proof.get("verifier_results", []) or []
+        vres: list[dict[str, Any]] = proof.get("verifier_results", []) or []
         skipped = sum(1 for r in vres if r.get("skipped"))
         executed = len(vres) - skipped
         passed_count = sum(1 for r in vres if r.get("passed") and not r.get("skipped"))
@@ -95,12 +114,18 @@ def main() -> None:
     # Two minimal but meaningful cases.
     # The Python case exercises the "skipped tool" graceful path that the kernel must support.
     # The "other" case exercises the no-language-harness path.
-    tasks: List[tuple[str, Dict[str, str]]] = [
-        ("other", {"demo.txt": "This is not code.\nKernel must still produce a Proof.\n"}),
-        ("python", {"demo.py": "def add(a, b):\n    return a + b\n\nprint(add(2, 3))\n"}),
+    tasks: list[tuple[str, dict[str, str]]] = [
+        (
+            "other",
+            {"demo.txt": "This is not code.\nKernel must still produce a Proof.\n"},
+        ),
+        (
+            "python",
+            {"demo.py": "def add(a, b):\n    return a + b\n\nprint(add(2, 3))\n"},
+        ),
     ]
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for lang, files in tasks:
         r = run_one_verify(lang, files)
         results.append(r)

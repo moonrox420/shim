@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json.schemastore.org/pyrightconfig.json",
+  "typeCheckingMode": "basic",
+  "extraPaths": ["src"],
+  "executionEnvironments": [{ "root": "src" }, { "root": "." }]
+}

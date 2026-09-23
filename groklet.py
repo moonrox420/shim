@@ -2,11 +2,11 @@
 groklet — CLI entry point for the local Grok-Build Engine kernel.
 
 Primary modes:
-  verify   : the production path used by the /implement skill. Accepts a manifest of
-             proposed final file contents + optional expected self-hash. Returns a
-             Proof JSON. Exit code 0 only when overall_pass is true and uncertain is false.
-  run      : best-of-n generation + verification under the strict Grok-Build Engine prompt.
-             Useful for local-only "implement this" flows and for the scheduler smoke tests.
+verify   : the production path used by the /implement skill. Accepts a manifest of
+proposed final file contents + optional expected self-hash. Returns a
+Proof JSON. Exit code 0 only when overall_pass is true and uncertain is false.
+run      : best-of-n generation + verification under the strict Grok-Build Engine prompt.
+Useful for local-only "implement this" flows and for the scheduler smoke tests.
 
 The kernel is deliberately dependency-free (stdlib + subprocess for language tools).
 All discovery of the script itself is handled by shim.py for Windows reliability.
@@ -15,21 +15,25 @@ All discovery of the script itself is handled by shim.py for Windows reliability
 import argparse
 import hashlib
 import json
+import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 # Make "python .../groklet.py" and "python -m ..." work without installation
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
+# Local package imports (kept alphabetized for stable linting)
 from memory import get_unified_for_workspace
 from router import route_task
 from scheduler import best_of_n
-from verifier import verify_implementation, Proof
+from verifier import Proof, verify_implementation
 
 
-def _load_files_from_manifest_or_pairs(manifest: str | None, pairs: list[str]) -> Dict[str, str]:
-    files: Dict[str, str] = {}
+def _load_files_from_manifest_or_pairs(
+    manifest: str | None, pairs: list[str]
+) -> dict[str, str]:
+    files: dict[str, str] = {}
     if manifest:
         raw = json.loads(Path(manifest).read_text(encoding="utf-8"))
         if isinstance(raw, dict):
@@ -49,7 +53,7 @@ def _load_files_from_manifest_or_pairs(manifest: str | None, pairs: list[str]) -
     return files
 
 
-def _extract_files_from_proof(proof: Proof) -> Dict[str, str]:
+def _extract_files_from_proof(proof: Proof) -> dict[str, str]:
     """Robust extraction preferring canonical locations; falls back to structural scan."""
     candidates = [
         getattr(proof, "files", None),
@@ -61,14 +65,15 @@ def _extract_files_from_proof(proof: Proof) -> Dict[str, str]:
             return {str(k): str(v) for k, v in cand.items() if v}
 
     # Structured recursive descent only as last resort
-    def _scan(obj: Any, visited: set[int]) -> Dict[str, str] | None:
+    def _scan(obj: Any, visited: set[int]) -> dict[str, str] | None:
         if id(obj) in visited:
             return None
         visited.add(id(obj))
 
         if isinstance(obj, dict):
             has_code_keys = any(
-                isinstance(k, str) and k.endswith((".py", ".js", ".go", ".rs", ".json", ".ts", ".tsx"))
+                isinstance(k, str)
+                and k.endswith((".py", ".js", ".go", ".rs", ".json", ".ts", ".tsx"))
                 for k in obj
             )
             str_values = all(isinstance(v, str) for v in obj.values())
@@ -91,7 +96,7 @@ def _extract_files_from_proof(proof: Proof) -> Dict[str, str]:
     return _scan(proof, visited) or {}
 
 
-def _compute_manifest_hash(files: Dict[str, str]) -> str:
+def _compute_manifest_hash(files: dict[str, str]) -> str:
     """Deterministic SHA256 of sorted file contents for self-consistency checks."""
     h = hashlib.sha256()
     for name in sorted(files):
@@ -116,13 +121,25 @@ def main() -> int:
         "run",
         help="Generate N candidates under the Grok-Build Engine prompt, verify them, return best Proof",
     )
-    p_run.add_argument("--contract", default="implementer-v1", help="Contract identifier")
-    p_run.add_argument("--model", default="qwen2.5-coder:14b-instruct-q8_0", help="Ollama model for generation")
-    p_run.add_argument("--task", required=True, help="The implementation task description")
-    p_run.add_argument("--n", type=int, default=3, help="Number of parallel candidates (best-of-n)")
+    p_run.add_argument(
+        "--contract", default="implementer-v1", help="Contract identifier"
+    )
+    p_run.add_argument(
+        "--model",
+        default="qwen2.5-coder:14b-instruct-q8_0",
+        help="Ollama model for generation",
+    )
+    p_run.add_argument(
+        "--task", required=True, help="The implementation task description"
+    )
+    p_run.add_argument(
+        "--n", type=int, default=3, help="Number of parallel candidates (best-of-n)"
+    )
     p_run.add_argument("--language", default="python")
     p_run.add_argument("--worktree", default=None)
-    p_run.add_argument("--memory-workspace", default="default", help="Workspace id for memory briefing")
+    p_run.add_argument(
+        "--memory-workspace", default="default", help="Workspace id for memory briefing"
+    )
     p_run.add_argument(
         "--write-to-disk",
         action="store_true",
@@ -135,11 +152,24 @@ def main() -> int:
         "verify",
         help="Run the trusted kernel verifier (hash + overlay + language harnesses) and emit Proof",
     )
-    p_verify.add_argument("--hash", dest="expected_hash", default=None, help="Expected sha256:... of the manifest")
-    p_verify.add_argument("--language", default="python", help="Language for ruff/cargo/etc. harness")
-    p_verify.add_argument("--files", nargs="*", default=[], help="path:content pairs (or use --manifest)")
-    p_verify.add_argument("--manifest", default=None, help="Path to JSON file containing the file map")
-    p_verify.add_argument("--worktree", default=".", help="Base directory to overlay changes onto")
+    p_verify.add_argument(
+        "--hash",
+        dest="expected_hash",
+        default=None,
+        help="Expected sha256:... of the manifest",
+    )
+    p_verify.add_argument(
+        "--language", default="python", help="Language for ruff/cargo/etc. harness"
+    )
+    p_verify.add_argument(
+        "--files", nargs="*", default=[], help="path:content pairs (or use --manifest)"
+    )
+    p_verify.add_argument(
+        "--manifest", default=None, help="Path to JSON file containing the file map"
+    )
+    p_verify.add_argument(
+        "--worktree", default=".", help="Base directory to overlay changes onto"
+    )
     p_verify.add_argument("--contract", default="implementer-v1")
 
     # ------------------------------------------------------------------ route
@@ -150,13 +180,18 @@ def main() -> int:
 
     if args.cmd == "route":
         decision = route_task(args.task)
-        print(json.dumps({
-            "task_class": decision.task_class,
-            "model_tier": decision.model_tier,
-            "cheap_critic_ok": decision.cheap_critic_ok,
-            "parallelism": decision.parallelism,
-            "reason": decision.reason,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "task_class": decision.task_class,
+                    "model_tier": decision.model_tier,
+                    "cheap_critic_ok": decision.cheap_critic_ok,
+                    "parallelism": decision.parallelism,
+                    "reason": decision.reason,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     if args.cmd == "verify":
@@ -171,7 +206,7 @@ def main() -> int:
                 if isinstance(raw, dict) and "self_hash" in raw:
                     effective_hash = raw["self_hash"]
             except Exception:
-                pass
+                logging.getLogger(__name__).debug("Suppressed exception", exc_info=True)
 
         # Enforce manifest self-consistency when no external hash supplied
         if not effective_hash:
@@ -188,9 +223,11 @@ def main() -> int:
 
     if args.cmd == "run":
         decision = route_task(args.task)
-        print(f"\n{'='*80}")
-        print(f"ROUTING DECISION: {decision.task_class.upper()} (Tier: {decision.model_tier})")
-        print(f"{'='*80}")
+        print(f"\n{'=' * 80}")
+        print(
+            f"ROUTING DECISION: {decision.task_class.upper()} (Tier: {decision.model_tier})"
+        )
+        print(f"{'=' * 80}")
 
         mem = get_unified_for_workspace(args.memory_workspace)
         briefing = mem.retrieve_briefing(limit=6)
@@ -216,22 +253,24 @@ def main() -> int:
                 },
                 diff="",
             )
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             print(f"WARNING: Memory trace failed: {e}", file=sys.stderr)
 
-        print(f"\n{'='*20} EXECUTION SUMMARY {'='*20}")
+        print(f"\n{'=' * 20} EXECUTION SUMMARY {'=' * 20}")
         print(f"Contract:      {proof.contract_id}")
         print(f"Model:         {proof.model}")
         print(f"Overall Pass:  {'YES' if proof.overall_pass else 'NO'}")
         print(f"Uncertain:     {'YES' if proof.uncertain else 'NO'}")
         print(f"Hash:          {proof.content_hash}")
         print("-" * 60)
-        
+
         for res in proof.verifier_results:
             icon = "✓" if res.get("passed") else "✗"
-            print(f"[{icon}] {res.get('name', 'unknown').ljust(15)} : {res.get('output', 'N/A')[:80]}")
-        
-        print(f"{'='*60}\n")
+            print(
+                f"[{icon}] {res.get('name', 'unknown').ljust(15)} : {res.get('output', 'N/A')[:80]}"
+            )
+
+        print(f"{'=' * 60}\n")
 
         files_dict = _extract_files_from_proof(proof)
 
@@ -239,18 +278,18 @@ def main() -> int:
             for filename, content in files_dict.items():
                 if filename == "_no_files_provided" or not content.strip():
                     continue
-                
-                print(f"{'='*20} GENERATED CODE: {filename} {'='*20}")
+
+                print(f"{'=' * 20} GENERATED CODE: {filename} {'=' * 20}")
                 print(content)
-                print(f"{'='*60}\n")
-                
+                print(f"{'=' * 60}\n")
+
                 if args.write_to_disk:
                     try:
                         target = Path(filename)
                         target.parent.mkdir(parents=True, exist_ok=True)
                         target.write_text(content, encoding="utf-8")
                         print(f"[*] Successfully persisted {filename} to disk.")
-                    except Exception as e:
+                    except (OSError, TypeError, ValueError, UnicodeError) as e:
                         print(f"[!] Failed to write {filename}: {e}", file=sys.stderr)
                 else:
                     print("[*] Disk persistence skipped. Use --write-to-disk to save.")

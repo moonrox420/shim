@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shim"
+version = "0.1.0"
+description = "Local Grok-Build Engine kernel and verification shim"
+readme = {text = "Local Grok-Build Engine kernel and verification shim.", content-type = "text/plain"}
+requires-python = ">=3.10"
+dependencies = [
+"watchdog>=6.0.0",
+]
+
+[project.scripts]
+groklet = "groklet:main"
+
+[tool.setuptools]
+py-modules = ["groklet", "shim", "git_watcher"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.mypy]
+mypy_path = "src"
+namespace_packages = true
+explicit_package_bases = true
+
+[tool.ruff]
+target-version = "py310"
+

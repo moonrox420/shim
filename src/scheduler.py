@@ -16,9 +16,10 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
-try:
+if TYPE_CHECKING:
     from contract import Proof, resolve_contract
     from inference import (
         GenerationResult,
@@ -26,27 +27,40 @@ try:
         run_cheap_critic,
     )
     from verifier import verify_implementation
-except ImportError:
-    # Fallback when this module is imported as part of a real package
-    # (e.g. "from local_kernel.src import scheduler") rather than via the
-    # direct-execution model groklet.py sets up with sys.path.insert.
-    from .contract import Proof, resolve_contract
-    from .inference import (
-        GenerationResult,
-        generate_with_local_model,
-        run_cheap_critic,
-    )
-    from .verifier import verify_implementation
+else:
+    try:
+        from contract import Proof, resolve_contract
+        from inference import (
+            GenerationResult,
+            generate_with_local_model,
+            run_cheap_critic,
+        )
+        from verifier import verify_implementation
+    except ImportError:
+        # Fallback when this module is imported as part of a real package
+        # (e.g. "from local_kernel.src import scheduler") rather than via the
+        # direct-execution model groklet.py sets up with sys.path.insert.
+        from .contract import Proof, resolve_contract
+        from .inference import (
+            GenerationResult,
+            generate_with_local_model,
+            run_cheap_critic,
+        )
+        from .verifier import verify_implementation
 
 
-def _result_to_manifest(result: GenerationResult) -> Dict[str, str]:
+def _result_to_manifest(result: GenerationResult) -> dict[str, str]:
     """Normalize a GenerationResult into the flat files map expected by verifier."""
     if not result.success or not result.files:
         return {}
-    return {k: v for k, v in result.files.items() if isinstance(k, str) and isinstance(v, str)}
+    return {
+        k: v
+        for k, v in result.files.items()
+        if isinstance(k, str) and isinstance(v, str)
+    }
 
 
-def _compute_self_hash(files: Dict[str, str]) -> str:
+def _compute_self_hash(files: dict[str, str]) -> str:
     """Replicate the manifest self-hash logic for cross-checks."""
     combined = "\n".join(f"{p}\n{c}" for p, c in sorted(files.items()))
     return "sha256:" + hashlib.sha256(combined.encode("utf-8")).hexdigest()
@@ -58,13 +72,17 @@ def _generation_result_to_proof(
     task: str,
 ) -> Proof:
     """Convert a failed generation into a diagnostic Proof (never returns a lying 'pass')."""
-    vr: List[Dict[str, Any]] = []
+    vr: list[dict[str, Any]] = []
     if result.error:
         vr.append({"name": "generation", "passed": False, "output": result.error})
     if result.uncertain_reason:
-        vr.append({"name": "uncertain", "passed": False, "output": result.uncertain_reason})
+        vr.append(
+            {"name": "uncertain", "passed": False, "output": result.uncertain_reason}
+        )
     if not result.files:
-        vr.append({"name": "files", "passed": False, "output": "no files emitted by model"})
+        vr.append(
+            {"name": "files", "passed": False, "output": "no files emitted by model"}
+        )
 
     return Proof(
         contract_id=contract_id,
@@ -72,7 +90,9 @@ def _generation_result_to_proof(
         content_hash=_compute_self_hash(result.files) if result.files else "",
         verifier_results=vr,
         uncertain=True,
-        uncertain_reason=result.uncertain_reason or result.error or "generation failed to produce usable files",
+        uncertain_reason=result.uncertain_reason
+        or result.error
+        or "generation failed to produce usable files",
         model=result.model,
         duration_ms=result.duration_ms,
         patch_or_files_addressed=list(result.files.keys()),
@@ -80,11 +100,11 @@ def _generation_result_to_proof(
 
 
 def run_parallel_critics(
-    items: List[Any],
+    items: list[Any],
     critic_fn: Callable[[Any], Proof],
     max_workers: int = 4,
     early_exit_on_clean: bool = True,
-) -> List[Proof]:
+) -> list[Proof]:
     """
     Execute N independent critics (generation or review) in parallel.
     Returns the list of Proofs as they complete.
@@ -94,7 +114,7 @@ def run_parallel_critics(
     if not items:
         return []
 
-    results: List[Proof] = []
+    results: list[Proof] = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_item = {executor.submit(critic_fn, item): item for item in items}
@@ -109,7 +129,13 @@ def run_parallel_critics(
                         contract_id="critic-wrapper",
                         overall_pass=False,
                         content_hash="",
-                        verifier_results=[{"name": "critic_fn", "passed": False, "output": f"critic_fn returned {type(proof)} instead of Proof"}],
+                        verifier_results=[
+                            {
+                                "name": "critic_fn",
+                                "passed": False,
+                                "output": f"critic_fn returned {type(proof)} instead of Proof",
+                            }
+                        ],
                         uncertain=True,
                     )
                 results.append(proof)
@@ -120,17 +146,19 @@ def run_parallel_critics(
                     threshold = max(2, len(items) - 1)
                     if len(clean) >= threshold:
                         break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - critic work is intentionally isolated and must be converted into Proof diagnostics
                 results.append(
                     Proof(
                         contract_id="critic-error",
                         overall_pass=False,
                         content_hash="",
-                        verifier_results=[{
-                            "name": "parallel_critic_exception",
-                            "passed": False,
-                            "output": f"item={repr(item)[:120]} error={type(exc).__name__}: {exc}"
-                        }],
+                        verifier_results=[
+                            {
+                                "name": "parallel_critic_exception",
+                                "passed": False,
+                                "output": f"item={repr(item)[:120]} error={type(exc).__name__}: {exc}",
+                            }
+                        ],
                         uncertain=True,
                         uncertain_reason=str(exc)[:400],
                     )
@@ -144,13 +172,13 @@ def best_of_n(
     n: int = 3,
     *,
     contract_id: str = "implementer-v1",
-    language: Optional[str] = None,
+    language: str | None = None,
     memory_briefing: str = "",
     model: str = "qwen2.5-coder:14b",
     critic_model: str = "qwen2.5-coder:1.5b",
     base_url: str = "http://localhost:11434",
     max_workers: int = 3,
-    direct_callable: Optional[Callable[[str, str], str]] = None,
+    direct_callable: Callable[[str, str], str] | None = None,
 ) -> Proof:
     """
     Real best-of-n implementation.
@@ -161,8 +189,7 @@ def best_of_n(
        If none pass cleanly, returns the best (highest confidence or least-bad) failing Proof.
     4. All failures produce rich, actionable verifier_results.
     """
-    if n < 1:
-        n = 1
+    n = max(n, 1)
 
     start_time = time.time()
 
@@ -178,14 +205,14 @@ def best_of_n(
             direct_callable=direct_callable,
         )
 
-    generations: List[GenerationResult] = []
+    generations: list[GenerationResult] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = [ex.submit(_one_generation, i) for i in range(n)]
         for f in concurrent.futures.as_completed(futs):
             generations.append(f.result())
 
     # Phase 2: verify every candidate that emitted files
-    verified: List[Proof] = []
+    verified: list[Proof] = []
     for idx, gen in enumerate(generations):
         if not gen.success or not gen.files:
             verified.append(_generation_result_to_proof(gen, contract_id, task))
@@ -218,16 +245,20 @@ def best_of_n(
                 (proof.uncertain_reason or "")
                 + f" | model self-reported hash {gen.self_hash} does not match actual returned content hash {manifest_hash} (possible truncation)"
             )
-            proof.verifier_results.append({
-                "name": "self_hash_cross_check",
-                "passed": False,
-                "output": f"model claimed {gen.self_hash}, actual derived hash is {manifest_hash}",
-            })
+            proof.verifier_results.append(
+                {
+                    "name": "self_hash_cross_check",
+                    "passed": False,
+                    "output": f"model claimed {gen.self_hash}, actual derived hash is {manifest_hash}",
+                }
+            )
 
         # If generation itself flagged uncertainty, propagate it
         if gen.uncertain:
             proof.uncertain = True
-            proof.uncertain_reason = (proof.uncertain_reason or "") + f" | generation: {gen.uncertain_reason or gen.error}"
+            proof.uncertain_reason = (
+                proof.uncertain_reason or ""
+            ) + f" | generation: {gen.uncertain_reason or gen.error}"
 
         verified.append(proof)
 
@@ -250,12 +281,16 @@ def best_of_n(
         return (passing, not_unc, successful_steps, -len(p.verifier_results))
 
     verified.sort(key=_score, reverse=True)
-    best = verified[0] if verified else Proof(
-        contract_id=contract_id,
-        overall_pass=False,
-        content_hash="",
-        uncertain=True,
-        uncertain_reason="best_of_n produced zero candidates",
+    best = (
+        verified[0]
+        if verified
+        else Proof(
+            contract_id=contract_id,
+            overall_pass=False,
+            content_hash="",
+            uncertain=True,
+            uncertain_reason="best_of_n produced zero candidates",
+        )
     )
     best.duration_ms = int((time.time() - start_time) * 1000)
     return best
@@ -263,20 +298,27 @@ def best_of_n(
 
 def run_cheap_critics_on_proofs(
     task: str,
-    proofs_with_files: List[Tuple[Proof, Dict[str, str]]],
+    proofs_with_files: list[tuple[Proof, dict[str, str]]],
     *,
     memory_briefing: str = "",
     critic_model: str = "qwen2.5-coder:1.5b",
     max_workers: int = 4,
     base_url: str = "http://localhost:11434",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Run cheap local critics (tiny model) over already-generated candidates.
     Returns raw critic dicts (they are merged into verifier_results by callers when desired).
     """
-    def _critic(pair: Tuple[Proof, Dict[str, str]]) -> Dict[str, Any]:
+
+    def _critic(pair: tuple[Proof, dict[str, str]]) -> dict[str, Any]:
         _proof, files = pair
-        return run_cheap_critic(task, files, model=critic_model, memory_briefing=memory_briefing, base_url=base_url)
+        return run_cheap_critic(
+            task,
+            files,
+            model=critic_model,
+            memory_briefing=memory_briefing,
+            base_url=base_url,
+        )
 
     return run_parallel_critics(  # type: ignore[return-value]
         proofs_with_files,
@@ -292,7 +334,7 @@ def tree_search(
     depth: int = 2,
     branching: int = 2,
     contract_id: str = "implementer-v1",
-    language: Optional[str] = None,
+    language: str | None = None,
     memory_briefing: str = "",
     model: str = "qwen2.5-coder:14b",
     base_url: str = "http://localhost:11434",
@@ -305,7 +347,7 @@ def tree_search(
     Bounded by depth to avoid explosion.
     """
     current_task = task
-    last_proof: Optional[Proof] = None
+    last_proof: Proof | None = None
 
     for d in range(depth):
         proof = best_of_n(
@@ -329,4 +371,10 @@ def tree_search(
                 break
         current_task = f"{task}\n\nREFINEMENT NEEDED (previous attempt at depth {d} failed): {reason or 'improve robustness and completeness'}"
 
-    return last_proof or Proof(contract_id=contract_id, overall_pass=False, content_hash="", uncertain=True, uncertain_reason="tree_search exhausted depth without a candidate")
+    return last_proof or Proof(
+        contract_id=contract_id,
+        overall_pass=False,
+        content_hash="",
+        uncertain=True,
+        uncertain_reason="tree_search exhausted depth without a candidate",
+    )

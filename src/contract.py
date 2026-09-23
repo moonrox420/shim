@@ -4,37 +4,43 @@ AgentContract, Verifier, Proof etc.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Optional, List, Dict
+from typing import Any
+
 
 @dataclass
 class AgentContract:
     """The contract for a specialized agent (e.g. implementer-v1)."""
+
     version: int = 1
     id: str = "implementer-v1"
-    inputs: List[Dict[str, Any]] = field(default_factory=list)
-    outputs: List[Dict[str, Any]] = field(default_factory=list)
-    verifiers: List[Dict[str, Any]] = field(default_factory=list)
+    inputs: list[dict[str, Any]] = field(default_factory=list)
+    outputs: list[dict[str, Any]] = field(default_factory=list)
+    verifiers: list[dict[str, Any]] = field(default_factory=list)
     require_full_files_or_semantic_patch: bool = True
     min_confidence: float = 0.85
+
 
 @dataclass
 class Proof:
     """Trusted proof returned by verifier. Matches plan spec + runtime fields."""
+
     contract_id: str
     overall_pass: bool
     content_hash: str
-    verifier_results: List[Dict[str, Any]] = field(default_factory=list)
+    verifier_results: list[dict[str, Any]] = field(default_factory=list)
     uncertain: bool = False
-    uncertain_reason: Optional[str] = None
+    uncertain_reason: str | None = None
     sandbox: str = "workspace"
-    model: Optional[str] = None
+    model: str | None = None
     duration_ms: int = 0
     sandbox_profile_used: str = "workspace"
-    patch_or_files_addressed: List[str] = field(default_factory=list)
+    patch_or_files_addressed: list[str] = field(default_factory=list)
+
 
 # Example reference contracts per plan (implementer + reviewer + test-writer roles)
-IMPLEMENTER_V1 = AgentContract(
+_IMPLEMENTER_V1 = AgentContract(
     id="implementer-v1",
     inputs=[
         {"name": "task_desc", "io_type": "text"},
@@ -52,7 +58,7 @@ IMPLEMENTER_V1 = AgentContract(
     min_confidence=0.85,
 )
 
-REVIEWER_V1 = AgentContract(
+_REVIEWER_V1 = AgentContract(
     id="reviewer-v1",
     inputs=[
         {"name": "summary_file", "io_type": "file"},
@@ -66,7 +72,7 @@ REVIEWER_V1 = AgentContract(
     min_confidence=0.8,
 )
 
-TEST_WRITER_V1 = AgentContract(
+_TEST_WRITER_V1 = AgentContract(
     id="test-writer-v1",
     inputs=[{"name": "task_desc", "io_type": "text"}],
     outputs=[{"name": "test_file", "io_type": "file"}],
@@ -75,17 +81,37 @@ TEST_WRITER_V1 = AgentContract(
     min_confidence=0.85,
 )
 
+
+# Public aliases (canonical names consumed by verifier / scheduler / groklet).
+# Kept as the same objects as the private reference contracts above so there is
+# exactly one runtime identity for each contract.
+IMPLEMENTER_V1: AgentContract = _IMPLEMENTER_V1
+REVIEWER_V1: AgentContract = _REVIEWER_V1
+TEST_WRITER_V1: AgentContract = _TEST_WRITER_V1
+
+__all__ = [
+    "IMPLEMENTER_V1",
+    "REVIEWER_V1",
+    "TEST_WRITER_V1",
+    "AgentContract",
+    "Proof",
+    "generate_property_test_stub",
+    "make_edit_manifest",
+    "resolve_contract",
+]
+
+
 # ---------------------------------------------------------------------------
 # Structured output helper (plan Phase 1/1-3): prompt layer can instruct models
 # to emit this shape (or unified diff + self_hash). Kernel verifies the hash.
 # ---------------------------------------------------------------------------
 def make_edit_manifest(
     *,
-    files: Dict[str, str],
+    files: dict[str, str],
     confidence: float = 0.9,
     uncertain: bool = False,
-    uncertain_reason: Optional[str] = None,
-) -> Dict[str, Any]:
+    uncertain_reason: str | None = None,
+) -> dict[str, Any]:
     """Return a small JSON manifest the model should emit for kernel consumption."""
     combined = "\n".join(f"{p}\n{c}" for p, c in sorted(files.items()))
     h = "sha256:" + __import__("hashlib").sha256(combined.encode("utf-8")).hexdigest()
@@ -98,7 +124,8 @@ def make_edit_manifest(
         "uncertain_reason": uncertain_reason,
     }
 
-def generate_property_test_stub(summary_hint: str, language: Optional[str]) -> Optional[str]:
+
+def generate_property_test_stub(summary_hint: str, language: str | None) -> str | None:
     """
     Produce a minimal, always-present property/edge test skeleton when the verifier
     detects new logic that should be exercised. The skeleton is deliberately tiny and
@@ -114,16 +141,17 @@ def generate_property_test_stub(summary_hint: str, language: Optional[str]) -> O
     safe_hint = summary_hint.strip().replace("\n", " ")[:120]
     return (
         "def test_kernel_generated_edge_property():\n"
-        "    \"\"\"\n"
+        '    """\n'
         f"    Kernel-generated property skeleton for: {safe_hint}\n"
         "    The implementer must replace the body with meaningful assertions\n"
         "    exercising the new logic under error, boundary, and happy paths.\n"
         "    This stub itself must never be the cause of a failing Proof.\n"
-        "    \"\"\"\n"
+        '    """\n'
         "    # The production implementation under test must already exist and be importable.\n"
         "    # This test documents intent; real coverage lives in the task-specific tests.\n"
         "    assert True\n"
     )
+
 
 def resolve_contract(contract_id: str) -> AgentContract:
     """
@@ -131,9 +159,11 @@ def resolve_contract(contract_id: str) -> AgentContract:
     Resolves contract tokens into standard AgentContract dataclass schemas.
     """
     import sys
-    print(f"[*] Resolving runtime context using core dataclass for contract: {contract_id}", file=sys.stderr)
+
+    print(
+        f"[*] Resolving runtime context using core dataclass for contract: {contract_id}",
+        file=sys.stderr,
+    )
     return AgentContract(
-        id=contract_id,
-        require_full_files_or_semantic_patch=True,
-        min_confidence=0.85
+        id=contract_id, require_full_files_or_semantic_patch=True, min_confidence=0.85
     )

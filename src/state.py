@@ -8,27 +8,32 @@ writes under /tmp for resumption.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
 class RunState:
     plan_id: str
     status: str = "running"
-    completed_prs: List[str] = field(default_factory=list)
-    failed_prs: List[str] = field(default_factory=list)
-    proofs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    memory_patterns: List[Dict[str, Any]] = field(default_factory=list)
+    completed_prs: list[str] = field(default_factory=list)
+    failed_prs: list[str] = field(default_factory=list)
+    proofs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    memory_patterns: list[dict[str, Any]] = field(default_factory=list)
     started_at: str = ""
     last_updated_at: str = ""
 
     def __post_init__(self):
         if not self.started_at:
-            self.started_at = datetime.utcnow().isoformat()
-        self.last_updated_at = datetime.utcnow().isoformat()
+            self.started_at = _utc_now_iso()
+        self.last_updated_at = _utc_now_iso()
 
     def save(self, path: Path) -> None:
         try:
@@ -37,32 +42,40 @@ class RunState:
             tmp = path.with_suffix(path.suffix + ".tmp")
             tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
             tmp.replace(path)
-        except Exception:
+        except (OSError, TypeError, ValueError):
             try:
-                path.write_text(json.dumps(asdict(self), indent=2, default=str), encoding="utf-8")
-            except Exception:
-                pass
+                path.write_text(
+                    json.dumps(asdict(self), indent=2, default=str), encoding="utf-8"
+                )
+            except (OSError, TypeError, ValueError):
+                logging.getLogger(__name__).debug("Suppressed exception", exc_info=True)
 
     @classmethod
-    def load(cls, path: Path) -> "RunState":
+    def load(cls, path: Path) -> RunState:
         if not path.exists():
             return cls(plan_id="new")
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
-                data.setdefault("started_at", datetime.utcnow().isoformat())
-                data.setdefault("last_updated_at", datetime.utcnow().isoformat())
-                return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-        except Exception:
-            pass
+                data.setdefault("started_at", _utc_now_iso())
+                data.setdefault("last_updated_at", _utc_now_iso())
+                return cls(
+                    **{k: v for k, v in data.items() if k in cls.__dataclass_fields__}
+                )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            logging.getLogger(__name__).debug("Suppressed exception", exc_info=True)
         return cls(plan_id="new")
 
-    def record_proof(self, pr_id: str, proof: Dict[str, Any] | Any) -> None:
+    def record_proof(self, pr_id: str, proof: dict[str, Any] | Any) -> None:
         if not pr_id:
             return
         proof_dict = proof if isinstance(proof, dict) else {"raw": str(proof)}
         self.proofs[pr_id] = proof_dict
-        overall = bool(proof_dict.get("overall_pass")) if isinstance(proof_dict, dict) else False
+        overall = (
+            bool(proof_dict.get("overall_pass"))
+            if isinstance(proof_dict, dict)
+            else False
+        )
         if overall:
             if pr_id not in self.completed_prs:
                 self.completed_prs.append(pr_id)
@@ -71,12 +84,12 @@ class RunState:
             if pr_id not in self.failed_prs:
                 self.failed_prs.append(pr_id)
             self.completed_prs = [p for p in self.completed_prs if p != pr_id]
-        self.last_updated_at = datetime.utcnow().isoformat()
+        self.last_updated_at = _utc_now_iso()
 
     def mark_status(self, new_status: str) -> None:
         allowed = {"running", "succeeded", "failed", "cancelled"}
         self.status = new_status if new_status in allowed else "running"
-        self.last_updated_at = datetime.utcnow().isoformat()
+        self.last_updated_at = _utc_now_iso()
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, default=str)

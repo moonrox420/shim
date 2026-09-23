@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import socket
+import logging
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
-
+from typing import Any
 
 GROK_BUILD_ENGINE_PROMPT: str = """You are an Elite Senior Systems Architect. Your objective is to deliver production-ready, high-integrity code that prioritizes performance, security, and long-term maintainability. You view code as a long-term asset, akin to a house designed to last a century rather than a quick flip. You reject the practice of cutting corners or "token-saving" compression that sacrifices clarity, error handling, or robustness.
 
@@ -66,19 +66,20 @@ Avoid these common degradation patterns:
 @dataclass
 class GenerationResult:
     """Structured result from a single inference attempt."""
+
     success: bool
-    files: Dict[str, str] = field(default_factory=dict)
+    files: dict[str, str] = field(default_factory=dict)
     confidence: float = 0.0
     uncertain: bool = False
-    uncertain_reason: Optional[str] = None
+    uncertain_reason: str | None = None
     raw_output: str = ""
-    error: Optional[str] = None
+    error: str | None = None
     model: str = ""
     duration_ms: int = 0
-    self_hash: Optional[str] = None
+    self_hash: str | None = None
 
 
-def _compute_self_hash(files: Dict[str, str]) -> str:
+def _compute_self_hash(files: dict[str, str]) -> str:
     """Deterministic SHA256 over sorted path+content for manifest self-consistency."""
     h = hashlib.sha256()
     for name in sorted(files):
@@ -94,10 +95,12 @@ def build_implementer_prompt(
     task: str,
     contract_id: str,
     memory_briefing: str = "",
-    language_hint: Optional[str] = None,
+    language_hint: str | None = None,
 ) -> str:
     lang = language_hint or "python"
-    briefing_block = f"\n\n{memory_briefing.strip()}\n" if memory_briefing.strip() else ""
+    briefing_block = (
+        f"\n\n{memory_briefing.strip()}\n" if memory_briefing.strip() else ""
+    )
 
     instructions = f"""CONTRACT: {contract_id}
 
@@ -136,11 +139,15 @@ Emit the JSON object now."""
 
 def build_critic_prompt(
     task: str,
-    proposed_files: Dict[str, str],
+    proposed_files: dict[str, str],
     memory_briefing: str = "",
 ) -> str:
-    files_summary = "\n".join(f"- {p} ({len(c)} bytes)" for p, c in sorted(proposed_files.items()))
-    briefing_block = f"\n\n{memory_briefing.strip()}\n" if memory_briefing.strip() else ""
+    files_summary = "\n".join(
+        f"- {p} ({len(c)} bytes)" for p, c in sorted(proposed_files.items())
+    )
+    briefing_block = (
+        f"\n\n{memory_briefing.strip()}\n" if memory_briefing.strip() else ""
+    )
 
     return f"""CONTRACT: critic-v1
 
@@ -173,18 +180,23 @@ def _ollama_chat(
     *,
     base_url: str = "http://localhost:11434",
     timeout: float = 180.0,
-    options: Optional[Dict[str, Any]] = None,
-) -> Tuple[str, int]:
+    options: dict[str, Any] | None = None,
+) -> tuple[str, int]:
     url = f"{base_url.rstrip('/')}/api/chat"
     payload = {
         "model": model,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
         "stream": False,
         "options": options or {"temperature": 0.2, "top_p": 0.9, "num_predict": 16384},
     }
     data = json.dumps(payload).encode("utf-8")
 
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"}, method="POST"
+    )
 
     start = time.time()
     for attempt in range(3):
@@ -193,28 +205,32 @@ def _ollama_chat(
                 body = resp.read().decode("utf-8", errors="replace")
                 obj = json.loads(body)
                 msg = obj.get("message") or {}
-                content = msg.get("content", "") if isinstance(msg, dict) else obj.get("response", "")
+                content = (
+                    msg.get("content", "")
+                    if isinstance(msg, dict)
+                    else obj.get("response", "")
+                )
                 dur = int((time.time() - start) * 1000)
                 return content.strip(), dur
         except urllib.error.HTTPError as e:
             if e.code not in (429, 500, 502, 503) or attempt == 2:
                 raise
             time.sleep(0.8 * (attempt + 1))
-        except (urllib.error.URLError, socket.timeout, json.JSONDecodeError):
+        except (TimeoutError, urllib.error.URLError, json.JSONDecodeError):
             if attempt == 2:
                 raise
             time.sleep(0.6 * (attempt + 1))
     raise RuntimeError("Ollama request failed after retries")
 
 
-def _force_json_object(text: str) -> Dict[str, Any]:
+def _force_json_object(text: str) -> dict[str, Any]:
     text = text.strip()
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
             return obj
-    except Exception:
-        pass
+    except (TypeError, ValueError, json.JSONDecodeError):
+        logging.getLogger(__name__).debug("Suppressed exception", exc_info=True)
 
     start = text.find("{")
     if start == -1:
@@ -243,11 +259,11 @@ def generate_with_local_model(
     model: str = "qwen2.5-coder:14b",
     contract_id: str = "implementer-v1",
     memory_briefing: str = "",
-    language_hint: Optional[str] = None,
+    language_hint: str | None = None,
     base_url: str = "http://localhost:11434",
     timeout: float = 180.0,
     temperature: float = 0.18,
-    direct_callable: Optional[Callable[[str, str], str]] = None,
+    direct_callable: Callable[[str, str], str] | None = None,
 ) -> GenerationResult:
     start = time.time()
     system = GROK_BUILD_ENGINE_PROMPT
@@ -264,14 +280,30 @@ def generate_with_local_model(
                 user=user,
                 base_url=base_url,
                 timeout=timeout,
-                options={"temperature": temperature, "top_p": 0.92, "num_predict": 20000},
+                options={
+                    "temperature": temperature,
+                    "top_p": 0.92,
+                    "num_predict": 20000,
+                },
             )
 
         obj = _force_json_object(raw)
-        files = {str(k): str(v) for k, v in (obj.get("files") or {}).items() if isinstance(k, str)}
+        files = {
+            str(k): str(v)
+            for k, v in (obj.get("files") or {}).items()
+            if isinstance(k, str)
+        }
 
         if not files:
-            return GenerationResult(success=False, error="empty files map", raw_output=raw[:4000], model=model, duration_ms=dur, uncertain=True, uncertain_reason="empty files")
+            return GenerationResult(
+                success=False,
+                error="empty files map",
+                raw_output=raw[:4000],
+                model=model,
+                duration_ms=dur,
+                uncertain=True,
+                uncertain_reason="empty files",
+            )
 
         reported_hash = obj.get("self_hash")
         if isinstance(reported_hash, str) and reported_hash.startswith("sha256:"):
@@ -291,20 +323,35 @@ def generate_with_local_model(
             self_hash=reported_hash,
         )
 
-    except Exception as e:
+    except (
+        TypeError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+        OSError,
+        RuntimeError,
+    ) as e:
         dur = int((time.time() - start) * 1000)
-        return GenerationResult(success=False, error=str(e), raw_output="", model=model, duration_ms=dur, uncertain=True, uncertain_reason=str(e)[:300])
+        return GenerationResult(
+            success=False,
+            error=str(e),
+            raw_output="",
+            model=model,
+            duration_ms=dur,
+            uncertain=True,
+            uncertain_reason=str(e)[:300],
+        )
 
 
 def run_cheap_critic(
     task: str,
-    proposed_files: Dict[str, str],
+    proposed_files: dict[str, str],
     *,
     model: str = "qwen2.5-coder:14b-instruct-q8_0",
     memory_briefing: str = "",
     base_url: str = "http://localhost:11434",
-    direct_callable: Optional[Callable[[str, str], str]] = None,
-) -> Dict[str, Any]:
+    direct_callable: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
     start = time.time()
     system = GROK_BUILD_ENGINE_PROMPT
     user = build_critic_prompt(task, proposed_files, memory_briefing)
@@ -313,16 +360,36 @@ def run_cheap_critic(
         if direct_callable is not None:
             raw = direct_callable(system, user)
         else:
-            raw, _ = _ollama_chat(model=model, system=system, user=user, base_url=base_url, timeout=90.0, options={"temperature": 0.1, "num_predict": 4096})
+            raw, _ = _ollama_chat(
+                model=model,
+                system=system,
+                user=user,
+                base_url=base_url,
+                timeout=90.0,
+                options={"temperature": 0.1, "num_predict": 4096},
+            )
         obj = _force_json_object(raw)
         obj.setdefault("duration_ms", int((time.time() - start) * 1000))
         obj.setdefault("model", model)
         return obj
-    except Exception as e:
+    except (
+        TypeError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+        OSError,
+        RuntimeError,
+    ) as e:
         return {
             "overall_pass": False,
             "confidence": 0.0,
-            "issues": [{"file": "<critic>", "severity": "bug", "description": f"Critic failed: {e}"}],
+            "issues": [
+                {
+                    "file": "<critic>",
+                    "severity": "bug",
+                    "description": f"Critic failed: {e}",
+                }
+            ],
             "uncertain": True,
             "uncertain_reason": str(e)[:300],
             "duration_ms": int((time.time() - start) * 1000),
@@ -331,7 +398,12 @@ def run_cheap_critic(
 
 
 if __name__ == "__main__":
-    print("inference.py loaded. GROK_BUILD_ENGINE_PROMPT length:", len(GROK_BUILD_ENGINE_PROMPT))
-    p = build_implementer_prompt("Add robust retry helper.", "implementer-v1", "", "python")
+    print(
+        "inference.py loaded. GROK_BUILD_ENGINE_PROMPT length:",
+        len(GROK_BUILD_ENGINE_PROMPT),
+    )
+    p = build_implementer_prompt(
+        "Add robust retry helper.", "implementer-v1", "", "python"
+    )
     assert "MANDATORY OUTPUT FORMAT" in p
     print("Prompt construction OK.")

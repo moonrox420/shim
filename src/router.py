@@ -8,7 +8,7 @@ the scheduler and groklet run paths consume.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 
 @dataclass
@@ -21,19 +21,52 @@ class RouterDecision:
 
 
 _IMPLEMENT_KEYWORDS = (
-    "implement", "build", "add ", "create ", "write ", "fix bug", "bug fix",
-    "refactor", "port", "migrate", "introduce", "new feature", "feature:",
-    "develop", "code", "write code",
+    "implement",
+    "build",
+    "add ",
+    "create ",
+    "write ",
+    "fix bug",
+    "bug fix",
+    "refactor",
+    "port",
+    "migrate",
+    "introduce",
+    "new feature",
+    "feature:",
+    "develop",
+    "code",
+    "write code",
 )
 
-_REVIEW_KEYWORDS = ("review", "audit", "check ", "verify", "inspect", "critic", "evaluate")
+_REVIEW_KEYWORDS = (
+    "review",
+    "audit",
+    "check ",
+    "verify",
+    "inspect",
+    "critic",
+    "evaluate",
+)
 
-_EXPLORE_KEYWORDS = ("explore", "search", "find ", "understand", "investigate", "trace ", "how does", "explain ", "what is")
+_EXPLORE_KEYWORDS = (
+    "explore",
+    "search",
+    "find ",
+    "understand",
+    "investigate",
+    "trace ",
+    "how does",
+    "explain ",
+    "what is",
+)
 
 _TEST_KEYWORDS = ("test", "spec ", "property test", "add test", "coverage", "unit test")
 
 
-def route_task(description: str, context: Optional[Dict[str, Any]] = None) -> RouterDecision:
+def route_task(
+    description: str, context: dict[str, Any] | None = None
+) -> RouterDecision:
     if not description or not description.strip():
         return RouterDecision(
             task_class="general",
@@ -59,7 +92,7 @@ def route_task(description: str, context: Optional[Dict[str, Any]] = None) -> Ro
         )
 
     if any(k in desc_lower for k in _IMPLEMENT_KEYWORDS):
-        tier = "strong" if any(x in desc_lower for x in ("security", "auth", "crypto", "protocol", "concurrency", "performance", "thread", "async")) else "strong"
+        tier: Literal["tiny", "medium", "strong"] = "strong"
         return RouterDecision(
             task_class="implement",
             model_tier=tier,

@@ -18,13 +18,13 @@ Everything is fully implemented with defensive error handling and no silent path
 # We intentionally support the direct-execution model used by groklet and shim.
 try:
     from contract import (  # type: ignore
-        AgentContract,
-        Proof,
         IMPLEMENTER_V1,
         REVIEWER_V1,
         TEST_WRITER_V1,
-        make_edit_manifest,
+        AgentContract,
+        Proof,
         generate_property_test_stub,
+        make_edit_manifest,
     )
     from inference import (  # type: ignore
         GROK_BUILD_ENGINE_PROMPT,
@@ -36,22 +36,26 @@ try:
     from router import RouterDecision, route_task  # type: ignore
     from scheduler import (  # type: ignore
         best_of_n,
+        run_cheap_critics_on_proofs,
         run_parallel_critics,
         tree_search,
-        run_cheap_critics_on_proofs,
     )
     from state import RunState  # type: ignore
-    from verifier import verify_implementation, compute_content_hash, verify_hash  # type: ignore
+    from verifier import (  # type: ignore
+        compute_content_hash,
+        verify_hash,
+        verify_implementation,
+    )
 except ImportError:
     # Fallback when running as a real package (local_kernel.src)
     from .contract import (  # type: ignore
-        AgentContract,
-        Proof,
         IMPLEMENTER_V1,
         REVIEWER_V1,
         TEST_WRITER_V1,
-        make_edit_manifest,
+        AgentContract,
+        Proof,
         generate_property_test_stub,
+        make_edit_manifest,
     )
     from .inference import (  # type: ignore
         GROK_BUILD_ENGINE_PROMPT,
@@ -63,35 +67,39 @@ except ImportError:
     from .router import RouterDecision, route_task  # type: ignore
     from .scheduler import (  # type: ignore
         best_of_n,
+        run_cheap_critics_on_proofs,
         run_parallel_critics,
         tree_search,
-        run_cheap_critics_on_proofs,
     )
     from .state import RunState  # type: ignore
-    from .verifier import verify_implementation, compute_content_hash, verify_hash  # type: ignore
+    from .verifier import (  # type: ignore
+        compute_content_hash,
+        verify_hash,
+        verify_implementation,
+    )
 
 __all__ = [
-    "AgentContract",
-    "Proof",
+    "GROK_BUILD_ENGINE_PROMPT",
     "IMPLEMENTER_V1",
     "REVIEWER_V1",
     "TEST_WRITER_V1",
-    "make_edit_manifest",
-    "generate_property_test_stub",
-    "GROK_BUILD_ENGINE_PROMPT",
+    "AgentContract",
     "GenerationResult",
-    "generate_with_local_model",
-    "run_cheap_critic",
-    "UnifiedMemory",
-    "get_unified_for_workspace",
+    "Proof",
     "RouterDecision",
-    "route_task",
+    "RunState",
+    "UnifiedMemory",
     "best_of_n",
+    "compute_content_hash",
+    "generate_property_test_stub",
+    "generate_with_local_model",
+    "get_unified_for_workspace",
+    "make_edit_manifest",
+    "route_task",
+    "run_cheap_critic",
+    "run_cheap_critics_on_proofs",
     "run_parallel_critics",
     "tree_search",
-    "run_cheap_critics_on_proofs",
-    "RunState",
-    "verify_implementation",
-    "compute_content_hash",
     "verify_hash",
+    "verify_implementation",
 ]
